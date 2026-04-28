@@ -555,19 +555,25 @@ async def cmd_backup(message: Message):
     file_path = "/tmp/backup.sql"
     
     # Отримуємо дані з env
-    db_user = os.getenv("POSTGRES_USER")
-    db_name = os.getenv("POSTGRES_DB")
-    db_pass = os.getenv("POSTGRES_PASSWORD")
-    db_host = "db" # Назва сервісу в docker-compose
+    db_user = os.getenv("DB_USER", os.getenv("POSTGRES_USER", "postgres"))
+    db_name = os.getenv("DB_NAME", os.getenv("POSTGRES_DB", "monitoring_db"))
+    db_pass = os.getenv("DB_PASS", os.getenv("POSTGRES_PASSWORD", "postgres"))
+    db_host = os.getenv("DB_HOST", os.getenv("POSTGRES_HOST", "db"))
+    db_type = os.getenv("DB_TYPE", "postgres")
     
-    # Виконуємо pg_dump
-    env = os.environ.copy()
-    env["PGPASSWORD"] = db_pass
+    if db_type == "mysql":
+        # Виконуємо mysqldump
+        cmd = f"mysqldump -h{db_host} -u{db_user} -p{db_pass} {db_name} > {file_path}"
+        process = await asyncio.create_subprocess_shell(cmd)
+    else:
+        # Виконуємо pg_dump
+        env = os.environ.copy()
+        env["PGPASSWORD"] = db_pass
+        process = await asyncio.create_subprocess_exec(
+            "pg_dump", "-h", db_host, "-U", db_user, "-f", file_path, db_name,
+            env=env
+        )
     
-    process = await asyncio.create_subprocess_exec(
-        "pg_dump", "-h", db_host, "-U", db_user, "-f", file_path, db_name,
-        env=env
-    )
     await process.wait()
     
     if process.returncode == 0:
