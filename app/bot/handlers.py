@@ -561,10 +561,23 @@ async def cmd_backup(message: Message):
     db_host = os.getenv("DB_HOST", os.getenv("POSTGRES_HOST", "db"))
     db_type = os.getenv("DB_TYPE", "postgres")
     
-    if db_type == "mysql":
+    if db_type == "sqlite":
+        # Створюємо копію файлу SQLite
+        import shutil
+        db_file = "monitoring_db.sqlite"
+        if os.path.exists(db_file):
+            shutil.copy(db_file, file_path)
+            # Для SQLite встановлюємо returncode в 0 вручну
+            class Process: returncode = 0
+            process = Process()
+        else:
+            await message.answer("❌ Файл бази даних не знайдено.")
+            return
+    elif db_type == "mysql":
         # Виконуємо mysqldump
         cmd = f"mysqldump -h{db_host} -u{db_user} -p{db_pass} {db_name} > {file_path}"
         process = await asyncio.create_subprocess_shell(cmd)
+        await process.wait()
     else:
         # Виконуємо pg_dump
         env = os.environ.copy()
@@ -573,8 +586,7 @@ async def cmd_backup(message: Message):
             "pg_dump", "-h", db_host, "-U", db_user, "-f", file_path, db_name,
             env=env
         )
-    
-    await process.wait()
+        await process.wait()
     
     if process.returncode == 0:
         await message.answer_document(

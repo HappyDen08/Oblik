@@ -13,10 +13,12 @@ DB_PASS = os.getenv("DB_PASS", os.getenv("POSTGRES_PASSWORD", "postgres"))
 DB_HOST = os.getenv("DB_HOST", os.getenv("POSTGRES_HOST", "localhost"))
 DB_PORT = os.getenv("DB_PORT", os.getenv("POSTGRES_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", os.getenv("POSTGRES_DB", "monitoring_db"))
-DB_TYPE = os.getenv("DB_TYPE", "postgres") # 'postgres' or 'mysql'
+DB_TYPE = os.getenv("DB_TYPE", "sqlite") # 'postgres', 'mysql' or 'sqlite'
 
 if DB_TYPE == "mysql":
     DATABASE_URL = f"mysql+aiomysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+elif DB_TYPE == "sqlite":
+    DATABASE_URL = f"sqlite+aiosqlite:///monitoring_db.sqlite"
 else:
     DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 

@@ -76,6 +76,7 @@ async def load_data(json_file):
 
 if __name__ == "__main__":
     import sys
+    asyncio.run(init_db())
     json_path = sys.argv[1] if len(sys.argv) > 1 else "data_dump.json"
     if os.path.exists(json_path):
         asyncio.run(load_data(json_path))
