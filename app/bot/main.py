@@ -19,12 +19,12 @@ async def main():
         return
 
     # Налаштування проксі для безкоштовного тарифу PythonAnywhere
-    proxy_url = os.getenv("http_proxy")
     session = None
-    if proxy_url:
+    if os.getenv("http_proxy"):
         from aiogram.client.session.aiohttp import AiohttpSession
-        session = AiohttpSession(proxy=proxy_url)
-        logging.info(f"Using proxy: {proxy_url}")
+        # trust_env=True дозволяє aiohttp автоматично використовувати системні проксі
+        session = AiohttpSession()
+        logging.info("Using system proxy via trust_env")
 
     bot = Bot(token=bot_token, session=session)
     dp = Dispatcher()
