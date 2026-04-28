@@ -18,7 +18,15 @@ async def main():
         logging.error("BOT_TOKEN is not set!")
         return
 
-    bot = Bot(token=bot_token)
+    # Налаштування проксі для безкоштовного тарифу PythonAnywhere
+    proxy_url = os.getenv("http_proxy")
+    session = None
+    if proxy_url:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        session = AiohttpSession(proxy=proxy_url)
+        logging.info(f"Using proxy: {proxy_url}")
+
+    bot = Bot(token=bot_token, session=session)
     dp = Dispatcher()
     
     dp.include_router(router)
