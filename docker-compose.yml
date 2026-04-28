@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-monitoring_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./local_db_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    command: python main.py api
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+
+  bot:
+    build: .
+    command: python main.py bot
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - db
+

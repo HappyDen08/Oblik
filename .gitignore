@@ -1,0 +1,4 @@
+local_db_data/*
+.env
+__pycache__/*
+data_dump.json
