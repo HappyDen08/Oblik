@@ -20,18 +20,22 @@ async def main():
 
     # Налаштування проксі для безкоштовного тарифу PythonAnywhere
     session = None
-    if os.getenv("http_proxy"):
+    proxy_url = os.getenv("http_proxy")
+    if proxy_url:
         from aiogram.client.session.aiohttp import AiohttpSession
-        # trust_env=True дозволяє aiohttp автоматично використовувати системні проксі
-        session = AiohttpSession()
-        logging.info("Using system proxy via trust_env")
+        session = AiohttpSession(proxy=proxy_url)
+        logging.info(f"Using proxy: {proxy_url}")
 
     bot = Bot(token=bot_token, session=session)
     dp = Dispatcher()
     
     dp.include_router(router)
     
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.warning(f"Could not delete webhook (this is often normal on PythonAnywhere): {e}")
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
