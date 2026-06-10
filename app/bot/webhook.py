@@ -42,10 +42,25 @@ dp = Dispatcher()
 dp.include_router(router)
 
 # Весь asyncio-код (aiogram, aiosqlite) живе на одному фоновому лупі,
-# бо WSGI-воркер синхронний.
-loop = asyncio.new_event_loop()
-threading.Thread(target=loop.run_forever, daemon=True).start()
-asyncio.run_coroutine_threadsafe(init_db(), loop).result(timeout=30)
+# бо WSGI-воркер синхронний. Луп створюємо ЛІНИВО, при першому запиті:
+# uWSGI імпортує модуль у майстер-процесі й потім форкає воркера,
+# а потоки форк не переживають — луп, запущений при імпорті, у воркері мертвий.
+_loop = None
+_loop_pid = None
+_loop_lock = threading.Lock()
+
+
+def get_loop():
+    global _loop, _loop_pid
+    with _loop_lock:
+        if _loop is None or _loop_pid != os.getpid():
+            _loop = asyncio.new_event_loop()
+            _loop_pid = os.getpid()
+            threading.Thread(target=_loop.run_forever, daemon=True).start()
+            asyncio.run_coroutine_threadsafe(init_db(), _loop).result(timeout=30)
+            logging.info(f"Event loop started in pid {_loop_pid}")
+        return _loop
+
 
 app = Flask(__name__)
 
@@ -54,10 +69,18 @@ app = Flask(__name__)
 def telegram_webhook():
     if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         abort(403)
+    loop = get_loop()
     update = Update.model_validate(request.get_json(force=True), context={"bot": bot})
     # Відповідаємо Telegram одразу, обробка йде у фоні
-    asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), loop)
+    future = asyncio.run_coroutine_threadsafe(dp.feed_update(bot, update), loop)
+    future.add_done_callback(_log_update_errors)
     return "ok"
+
+
+def _log_update_errors(future):
+    exc = future.exception()
+    if exc:
+        logging.exception("Update processing failed", exc_info=exc)
 
 
 @app.get("/")
