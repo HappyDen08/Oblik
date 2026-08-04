@@ -19,3 +19,8 @@ class EditBalanceState(StatesGroup):
     waiting_for_student = State()
     waiting_for_amount = State()
     waiting_for_confirmation = State()
+
+class TariffState(StatesGroup):
+    waiting_for_student = State()
+    waiting_for_price = State()
+    waiting_for_confirmation = State()

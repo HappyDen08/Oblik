@@ -7,7 +7,8 @@ def get_main_keyboard(user_id: int = None):
         [KeyboardButton(text="Внести транзакцію")],
         [KeyboardButton(text="Внести відвідування")],
         [KeyboardButton(text="Інформація по учню")],
-        [KeyboardButton(text="Редагувати баланс")]
+        [KeyboardButton(text="Редагувати баланс")],
+        [KeyboardButton(text="Тариф учня")]
     ]
     
     admin_id = os.getenv("ADMIN_ID")

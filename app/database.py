@@ -42,6 +42,8 @@ class Student(Base):
     first_name: Mapped[str] = mapped_column(String(50))
     last_name: Mapped[str] = mapped_column(String(50))
     balance_lessons: Mapped[float] = mapped_column(Float, default=0.0)
+    # Індивідуальний тариф (ціна за 1 урок). Якщо None — використовується глобальний LESSON_PRICE.
+    lesson_price: Mapped[float] = mapped_column(Float, nullable=True)
 
     transactions = relationship("Transaction", back_populates="student", cascade="all, delete")
     attendances = relationship("Attendance", back_populates="student", cascade="all, delete")
@@ -80,8 +82,12 @@ async def init_db():
         def add_column_if_missing(connection):
             from sqlalchemy import inspect, text
             inspector = inspect(connection)
-            columns = [c['name'] for c in inspector.get_columns('attendances')]
-            if 'balance_impact' not in columns:
+            att_columns = [c['name'] for c in inspector.get_columns('attendances')]
+            if 'balance_impact' not in att_columns:
                 connection.execute(text('ALTER TABLE attendances ADD COLUMN balance_impact FLOAT DEFAULT 0.0'))
-        
+
+            student_columns = [c['name'] for c in inspector.get_columns('students')]
+            if 'lesson_price' not in student_columns:
+                connection.execute(text('ALTER TABLE students ADD COLUMN lesson_price FLOAT'))
+
         await conn.run_sync(add_column_if_missing)

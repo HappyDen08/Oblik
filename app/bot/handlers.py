@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
 from app.database import async_session, Student, Transaction, Attendance, AttendanceStatus
-from app.bot.states import TransactionState, AttendanceState, InfoState, EditBalanceState
+from app.bot.states import TransactionState, AttendanceState, InfoState, EditBalanceState, TariffState
 from app.bot import keyboards
 
 import asyncio
@@ -17,6 +17,15 @@ router = Router()
 LESSON_PRICE = float(os.getenv("LESSON_PRICE", 250))
 ADMIN_ID = os.getenv("ADMIN_ID")
 ASSISTANT_ID = os.getenv("ASSISTANT_ID")
+
+# Тексти кнопок меню та службові слова — їх не можна сприймати як ім'я нового учня,
+# інакше при натисканні кнопки меню під час вибору учня створюється "сміттєвий" учень.
+RESERVED_TEXTS = {
+    "Внести транзакцію", "Внести відвідування", "Інформація по учню",
+    "Редагувати баланс", "Тариф учня", "Бекап бази", "Скасувати",
+    "Сьогодні", "Вчора", "Так, все вірно",
+    "Була (-1 урок)", "Не була (перенесено)", "Не була (списано)",
+}
 
 @router.message.outer_middleware()
 async def access_middleware(handler, event, data):
@@ -69,6 +78,15 @@ async def process_transaction_student_cb(callback: CallbackQuery, state: FSMCont
     await callback.message.answer("Введіть суму надходження (число):", reply_markup=keyboards.get_cancel_keyboard())
     await state.set_state(TransactionState.waiting_for_amount)
     await callback.answer()
+
+@router.message(TransactionState.waiting_for_student, F.text.in_(RESERVED_TEXTS))
+async def process_transaction_menu_pressed(message: Message, state: FSMContext):
+    # Користувач натиснув кнопку меню замість вибору/введення учня — не створюємо учня.
+    await state.clear()
+    await message.answer(
+        "Дію скасовано. Оберіть пункт меню ще раз.",
+        reply_markup=keyboards.get_main_keyboard(message.from_user.id)
+    )
 
 @router.message(TransactionState.waiting_for_student)
 async def process_transaction_new_student(message: Message, state: FSMContext):
@@ -128,17 +146,19 @@ async def process_transaction_date(message: Message, state: FSMContext):
     data = await state.get_data()
     student_id = data["student_id"]
     amount = data["amount"]
-    lessons_added = amount / LESSON_PRICE
-    
+
     async with async_session() as session:
         student = await session.get(Student, student_id)
         student_name = f"{student.last_name} {student.first_name}"
+        price = student.lesson_price if student.lesson_price else LESSON_PRICE
+        lessons_added = amount / price
         await state.update_data(student_name=student_name, lessons_added=lessons_added)
 
     summary = (
         f"📋 Підтвердіть транзакцію:\n"
         f"👤 Учень: {student_name}\n"
         f"💰 Сума: {amount} грн\n"
+        f"🏷 Тариф: {price} грн/урок\n"
         f"📅 Дата: {date.strftime('%d.%m.%Y')}\n"
         f"📚 Буде додано занять: {lessons_added}\n"
     )
@@ -367,6 +387,85 @@ async def process_edit_balance_confirmation(message: Message, state: FSMContext)
     )
     await state.clear()
 
+# --- ТАРИФ УЧНЯ ---
+@router.message(F.text == "Тариф учня")
+async def process_tariff_start(message: Message, state: FSMContext):
+    async with async_session() as session:
+        result = await session.execute(select(Student))
+        students = result.scalars().all()
+
+    if not students:
+        await message.answer("Учнів ще немає в базі.")
+        return
+
+    await message.answer(
+        "Оберіть учня, щоб встановити тариф (ціну за 1 урок):",
+        reply_markup=keyboards.get_students_inline_keyboard(students)
+    )
+    await state.set_state(TariffState.waiting_for_student)
+
+@router.callback_query(TariffState.waiting_for_student, F.data.startswith("student_"))
+async def process_tariff_student_cb(callback: CallbackQuery, state: FSMContext):
+    student_id = int(callback.data.split("_")[1])
+    async with async_session() as session:
+        student = await session.get(Student, student_id)
+        current = student.lesson_price if student.lesson_price else LESSON_PRICE
+        is_custom = student.lesson_price is not None
+        student_name = f"{student.last_name} {student.first_name}"
+
+    await state.update_data(student_id=student_id, student_name=student_name)
+    await callback.message.answer(
+        f"👤 Учень: {student_name}\n"
+        f"🏷 Поточний тариф: {current} грн/урок"
+        f"{'' if is_custom else ' (загальний за замовчуванням)'}\n\n"
+        f"Введіть нову ціну за 1 урок (число, наприклад 300):",
+        reply_markup=keyboards.get_cancel_keyboard()
+    )
+    await state.set_state(TariffState.waiting_for_price)
+    await callback.answer()
+
+@router.message(TariffState.waiting_for_price)
+async def process_tariff_price(message: Message, state: FSMContext):
+    try:
+        price = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Будь ласка, введіть коректне число (наприклад 300).")
+        return
+
+    if price <= 0:
+        await message.answer("Ціна має бути більшою за 0.")
+        return
+
+    data = await state.get_data()
+    student_name = data["student_name"]
+    await state.update_data(price=price)
+
+    await message.answer(
+        f"📋 Підтвердіть тариф:\n"
+        f"👤 Учень: {student_name}\n"
+        f"🏷 Ціна за 1 урок: {price} грн",
+        reply_markup=keyboards.get_confirmation_keyboard()
+    )
+    await state.set_state(TariffState.waiting_for_confirmation)
+
+@router.message(TariffState.waiting_for_confirmation, F.text == "Так, все вірно")
+async def process_tariff_confirmation(message: Message, state: FSMContext):
+    data = await state.get_data()
+    student_id = data["student_id"]
+    price = data["price"]
+
+    async with async_session() as session:
+        student = await session.get(Student, student_id)
+        student.lesson_price = price
+        await session.commit()
+
+    await message.answer(
+        f"✅ Тариф збережено: {price} грн/урок.\n"
+        f"Наступні транзакції рахуватимуться за цим тарифом.",
+        reply_markup=keyboards.get_main_keyboard(message.from_user.id)
+    )
+    await state.clear()
+
 # --- ІНФОРМАЦІЯ ПО УЧНЮ ---
 @router.message(F.text == "Інформація по учню")
 async def process_info_start(message: Message, state: FSMContext):
@@ -392,9 +491,13 @@ async def process_info_student_cb(callback: CallbackQuery, state: FSMContext):
         att_res = await session.execute(select(Attendance).where(Attendance.student_id == student_id).order_by(Attendance.date.desc()).limit(5))
         attendances = att_res.scalars().all()
         
+    tariff = student.lesson_price if student.lesson_price else LESSON_PRICE
+    tariff_note = "" if student.lesson_price is not None else " (загальний)"
+
     text = f"👤 Учень: {student.last_name} {student.first_name}\n"
-    text += f"💰 Баланс: {student.balance_lessons} занять\n\n"
-    
+    text += f"💰 Баланс: {student.balance_lessons} занять\n"
+    text += f"🏷 Тариф: {tariff} грн/урок{tariff_note}\n\n"
+
     text += "📅 Останні відвідування:\n"
     for att in attendances:
         status_str = {
@@ -407,9 +510,10 @@ async def process_info_student_cb(callback: CallbackQuery, state: FSMContext):
     if not attendances:
         text += "- Немає записів\n"
         
-    # Створюємо кнопку для Excel
+    # Кнопки: Excel-звіт та видалення учня
     excel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Завантажити повний звіт (Excel)", callback_data=f"excel_{student_id}")]
+        [InlineKeyboardButton(text="📊 Завантажити повний звіт (Excel)", callback_data=f"excel_{student_id}")],
+        [InlineKeyboardButton(text="🗑 Видалити учня", callback_data=f"del_{student_id}")]
     ])
     
     # Відправляємо ОДНЕ повідомлення з даними та кнопкою
@@ -540,6 +644,48 @@ async def process_excel_export(callback: CallbackQuery):
         FSInputFile(file_path, filename=f"Звіт_{student.last_name}_{student.first_name}.xlsx"),
         caption=f"Повний звіт для {student.last_name} {student.first_name}"
     )
+    await callback.answer()
+
+# --- ВИДАЛЕННЯ УЧНЯ ---
+@router.callback_query(F.data.startswith("del_"))
+async def process_delete_request(callback: CallbackQuery):
+    student_id = int(callback.data.split("_")[1])
+    async with async_session() as session:
+        student = await session.get(Student, student_id)
+
+    if not student:
+        await callback.answer("Учня не знайдено.", show_alert=True)
+        return
+
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Так, видалити", callback_data=f"delok_{student_id}")],
+        [InlineKeyboardButton(text="❌ Ні, залишити", callback_data="delcancel")]
+    ])
+    await callback.message.answer(
+        f"⚠️ Видалити учня «{student.last_name} {student.first_name}» разом з усіма "
+        f"транзакціями та відвідуваннями? Дію не можна скасувати.",
+        reply_markup=confirm_kb
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("delok_"))
+async def process_delete_confirm(callback: CallbackQuery):
+    student_id = int(callback.data.split("_")[1])
+    async with async_session() as session:
+        student = await session.get(Student, student_id)
+        if not student:
+            await callback.answer("Учня не знайдено.", show_alert=True)
+            return
+        name = f"{student.last_name} {student.first_name}"
+        await session.delete(student)
+        await session.commit()
+
+    await callback.message.answer(f"🗑 Учня «{name}» видалено.")
+    await callback.answer()
+
+@router.callback_query(F.data == "delcancel")
+async def process_delete_cancel(callback: CallbackQuery):
+    await callback.message.answer("Видалення скасовано.")
     await callback.answer()
 
 # --- БЕКАП ---
