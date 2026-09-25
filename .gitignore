@@ -3,3 +3,5 @@ local_db_data/*
 __pycache__/*
 data_dump.json
 monitoring_db.sqlite
+data/
+.DS_Store

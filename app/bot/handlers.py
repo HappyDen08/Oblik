@@ -697,28 +697,32 @@ async def cmd_backup(message: Message):
         return
 
     await message.answer("⏳ Створюю бекап бази даних...")
-    
+
     file_path = "/tmp/backup.sql"
-    
+
     # Отримуємо дані з env
     db_user = os.getenv("DB_USER", os.getenv("POSTGRES_USER", "postgres"))
     db_name = os.getenv("DB_NAME", os.getenv("POSTGRES_DB", "monitoring_db"))
     db_pass = os.getenv("DB_PASS", os.getenv("POSTGRES_PASSWORD", "postgres"))
     db_host = os.getenv("DB_HOST", os.getenv("POSTGRES_HOST", "db"))
-    db_type = os.getenv("DB_TYPE", "postgres")
-    
+    db_type = os.getenv("DB_TYPE", "sqlite")
+
     if db_type == "sqlite":
-        # Створюємо копію файлу SQLite
+        # Копіюємо сам файл SQLite. Шлях беремо з engine, а не хардкодимо,
+        # бо в проді база лежить у окремому volume (DATABASE_URL).
         import shutil
-        db_file = "monitoring_db.sqlite"
-        if os.path.exists(db_file):
-            shutil.copy(db_file, file_path)
-            # Для SQLite встановлюємо returncode в 0 вручну
-            class Process: returncode = 0
-            process = Process()
+        from app.database import engine
+        db_file = engine.url.database
+        if db_file and os.path.exists(db_file):
+            sqlite_backup = "/tmp/backup.sqlite"
+            shutil.copy(db_file, sqlite_backup)
+            await message.answer_document(
+                FSInputFile(sqlite_backup, filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sqlite"),
+                caption="📦 Повний бекап бази даних успішно створено!"
+            )
         else:
             await message.answer("❌ Файл бази даних не знайдено.")
-            return
+        return
     elif db_type == "mysql":
         # Виконуємо mysqldump
         cmd = f"mysqldump -h{db_host} -u{db_user} -p{db_pass} {db_name} > {file_path}"
